@@ -1,0 +1,33 @@
+---
+- name: Allow all users to manage NetworkManager without a password
+  hosts: all
+  become: true
+
+  vars:
+    rules_file: /etc/polkit-1/rules.d/49-network-nopasswd.rules
+
+  tasks:
+    - name: Ensure polkit rules directory exists
+      ansible.builtin.file:
+        path: /etc/polkit-1/rules.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Deploy polkit rule for all users
+      ansible.builtin.copy:
+        dest: "{{ rules_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          polkit.addRule(function(action, subject) {
+              var actions = [
+                  "org.freedesktop.NetworkManager.network-control",
+                  "org.freedesktop.NetworkManager.settings.modify.system"
+              ];
+              if (actions.indexOf(action.id) !== -1) {
+                  return polkit.Result.YES;
+              }
+          });
