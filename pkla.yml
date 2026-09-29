@@ -1,0 +1,63 @@
+---
+- name: Allow all users to manage network connections without a password
+  hosts: all
+  become: true
+
+  vars:
+    pkla_dir: /etc/polkit-1/localauthority/50-local.d
+    pkla_file: "{{ pkla_dir }}/10-network-manager.pkla"
+    rules_file: /etc/polkit-1/rules.d/50-network-manager.rules
+
+  tasks:
+    - name: Ensure Ubuntu is the target OS
+      ansible.builtin.assert:
+        that: ansible_distribution == "Ubuntu"
+        fail_msg: "This playbook is intended for Ubuntu hosts only."
+
+    # ---- Ubuntu 22.04 and older: legacy .pkla ----
+    - name: Ensure pkla directory exists (Ubuntu < 24.04)
+      ansible.builtin.file:
+        path: "{{ pkla_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      when: ansible_distribution_version is version('24.04', '<')
+
+    - name: Deploy polkit .pkla rule (Ubuntu < 24.04)
+      ansible.builtin.copy:
+        dest: "{{ pkla_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Allow Users to Modify Connections]
+          Identity=unix-user:*
+          Action=org.freedesktop.NetworkManager.network-control
+          ResultAny=yes
+          ResultInactive=yes
+          ResultActive=yes
+      when: ansible_distribution_version is version('24.04', '<')
+      notify: Restart NetworkManager
+
+    # ---- Ubuntu 24.04 and newer: JavaScript .rules ----
+    - name: Deploy polkit .rules file (Ubuntu >= 24.04)
+      ansible.builtin.copy:
+        dest: "{{ rules_file }}"
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          polkit.addRule(function(action, subject) {
+              if (action.id == "org.freedesktop.NetworkManager.network-control") {
+                  return polkit.Result.YES;
+              }
+          });
+      when: ansible_distribution_version is version('24.04', '>=')
+      notify: Restart NetworkManager
+
+  handlers:
+    - name: Restart NetworkManager
+      ansible.builtin.service:
+        name: NetworkManager
+        state: restarted
